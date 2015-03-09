@@ -21,6 +21,9 @@ import json
 import logging
 import SimpleHTTPServer
 import SocketServer
+from tempfile import mkstemp
+from subprocess import check_output
+from md5 import md5
 
 from settings import Settings
 
@@ -88,39 +91,76 @@ def check_projects_path():
         os.mkdir(Settings.PROJECTS)
 
 
+def datauri_contents(data):
+    # Don't use the built in b64 decoder, it doesn't work as well
+    fd, p = mkstemp()
+    with os.fdopen(fd, 'w') as f:
+        f.write(data[len('data:image/png;base64,'):])
+
+    with open(p) as f:
+        data = check_output(['base64', '-d'], stdin=f)
+    os.remove(p)
+
+    return data
+
+
+def etag(data):
+    return '"{}"'.format(md5(data).hexdigest())
+
+
 class ServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
-    def do_OPTIONS(self):
-        logging.info(self.headers)
-
-        self.send_response(200, "ok")
+    def cors(self):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods',
                          'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers',
                          'x-project-id, x-api-key')
 
-    @authorize
+    def do_OPTIONS(self):
+        logging.info(self.headers)
+        self.send_response(200, 'ok')
+        self.cors()
+
     @check
     def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "application/json")
-        self.end_headers()
 
+        content_type = 'application/json'
         if get_project_id(self):
             body = get_one_project(self)
+            if body.startswith('data:image/png;base64,'):
+                body = datauri_contents(body)
+
+            if body.startswith('\x89PNG'):
+                content_type = 'image/png'
         else:
             body = get_all_projects()
-        self.wfile.write(body)
+
+        borwser_has_cache = \
+            self.headers.getheader('If-None-Match', '') == etag(body)
+
+        self.send_response(304 if borwser_has_cache else 200)
+        self.cors()
+        self.send_header('Content-type', content_type)
+        if content_type == 'image/png':
+            self.send_header('Cache-Control', 'public; max-age=31536000')
+            self.send_header('Etag', etag(body))
+        self.end_headers()
+        if not borwser_has_cache:
+            self.wfile.write(body)
 
     @authorize
     @check
     def do_POST(self):
         self.send_response(200)
+        self.cors()
         self.end_headers()
 
         content_len = int(self.headers.getheader('content-length', 0))
         content = self.rfile.read(content_len)
+
+        if content.startswith('data:image/png;base64,'):
+            content = datauri_contents(content)
 
         path = get_project_path(self)
         with open(path, 'w') as file:
