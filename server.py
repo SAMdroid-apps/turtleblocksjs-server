@@ -136,17 +136,17 @@ class ServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
         else:
             body = get_all_projects()
 
-        borwser_has_cache = \
+        browser_has_cache = \
             self.headers.getheader('If-None-Match', '') == etag(body)
 
-        self.send_response(304 if borwser_has_cache else 200)
+        self.send_response(304 if browser_has_cache else 200)
         self.cors()
         self.send_header('Content-type', content_type)
         if content_type == 'image/png':
             self.send_header('Cache-Control', 'public; max-age=31536000')
             self.send_header('Etag', etag(body))
         self.end_headers()
-        if not borwser_has_cache:
+        if not browser_has_cache:
             self.wfile.write(body)
 
     @authorize
