@@ -131,6 +131,7 @@ if __name__ == '__main__':
     httpd = SocketServer.TCPServer((Settings.ADDRESS,
                                     Settings.PORT),
                                    ServerHandler)
+    print 'Starting server on {}:{}'.format(Settings.ADDRESS, Settings.PORT)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
