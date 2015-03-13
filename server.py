@@ -90,20 +90,23 @@ def check_projects_path():
 
 class ServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
-    def do_OPTIONS(self):
-        logging.info(self.headers)
-
-        self.send_response(200, "ok")
+    def cors(self):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods',
                          'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers',
                          'x-project-id, x-api-key')
 
+    def do_OPTIONS(self):
+        logging.info(self.headers)
+        self.send_response(200, 'ok')
+        self.cors()
+
     @authorize
     @check
     def do_GET(self):
         self.send_response(200)
+        self.cors()
         self.send_header("Content-type", "application/json")
         self.end_headers()
 
@@ -117,6 +120,7 @@ class ServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
     @check
     def do_POST(self):
         self.send_response(200)
+        self.cors()
         self.end_headers()
 
         content_len = int(self.headers.getheader('content-length', 0))
