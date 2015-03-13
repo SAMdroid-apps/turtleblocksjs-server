@@ -22,6 +22,10 @@ import logging
 import SimpleHTTPServer
 import SocketServer
 
+from tempfile import mkstemp
+from subprocess import check_output
+from md5 import md5
+
 from settings import Settings
 
 
@@ -88,6 +92,25 @@ def check_projects_path():
         os.mkdir(Settings.PROJECTS)
 
 
+def datauri_contents(data):
+    # The python b64 decoder does not deal with edge cases. It raises
+    # exceptions decoding b64 from Turtle and decodes it incorrectly in
+    # other cases. The base64 command is much more robust.
+    fd, p = mkstemp()
+    with os.fdopen(fd, 'w') as f:
+        f.write(data[len('data:image/png;base64,'):])
+
+    with open(p) as f:
+        data = check_output(['base64', '-d'], stdin=f)
+    os.remove(p)
+
+    return data
+
+
+def etag(data):
+    return '"{}"'.format(md5(data).hexdigest())
+
+
 class ServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
     def cors(self):
@@ -102,19 +125,35 @@ class ServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
         self.send_response(200, 'ok')
         self.cors()
 
-    @authorize
     @check
     def do_GET(self):
-        self.send_response(200)
-        self.cors()
-        self.send_header("Content-type", "application/json")
-        self.end_headers()
-
+        content_type = 'application/json'
         if get_project_id(self):
             body = get_one_project(self)
+            if body.startswith('data:image/png;base64,'):
+                body = datauri_contents(body)
+
+            if body.startswith('\x89PNG'):
+                content_type = 'image/png'
         else:
             body = get_all_projects()
-        self.wfile.write(body)
+
+        browser_has_cache = \
+            self.headers.getheader('If-None-Match', '') == etag(body)
+
+        response_code = 200
+        if browser_has_cache:
+            response_code = 304
+        self.send_response(response_code)
+        self.cors()
+
+        self.send_header('Content-type', content_type)
+        if content_type == 'image/png':
+            self.send_header('Cache-Control', 'public; max-age=31536000')
+            self.send_header('Etag', etag(body))
+        self.end_headers()
+        if not browser_has_cache:
+            self.wfile.write(body)
 
     @authorize
     @check
@@ -125,6 +164,9 @@ class ServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
         content_len = int(self.headers.getheader('content-length', 0))
         content = self.rfile.read(content_len)
+
+        if content.startswith('data:image/png;base64,'):
+            content = datauri_contents(content)
 
         path = get_project_path(self)
         with open(path, 'w') as file:
