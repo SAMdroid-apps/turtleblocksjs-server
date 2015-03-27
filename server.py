@@ -29,6 +29,8 @@ from md5 import md5
 from settings import Settings
 
 
+DATA_URLS = ['data:image/png;base64,', 'data:image/svg+xml;base64,']
+
 def authorize(method):
     """ just a basic method for authorization """
     def verify(handler, *args, **kwargs):
@@ -92,13 +94,13 @@ def check_projects_path():
         os.mkdir(Settings.PROJECTS)
 
 
-def datauri_contents(data):
+def datauri_contents(data, type_):
     # The python b64 decoder does not deal with edge cases. It raises
     # exceptions decoding b64 from Turtle and decodes it incorrectly in
     # other cases. The base64 command is much more robust.
     fd, p = mkstemp()
     with os.fdopen(fd, 'w') as f:
-        f.write(data[len('data:image/png;base64,'):])
+        f.write(data[len(type_):])
 
     with open(p) as f:
         data = check_output(['base64', '-d'], stdin=f)
@@ -130,11 +132,15 @@ class ServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
         content_type = 'application/json'
         if get_project_id(self):
             body = get_one_project(self)
-            if body.startswith('data:image/png;base64,'):
-                body = datauri_contents(body)
+            for t in DATA_URLS:
+                if body.startswith(t):
+                    body = datauri_contents(body, t)
 
             if body.startswith('\x89PNG'):
                 content_type = 'image/png'
+
+            if body.startswith('<svg'):
+                content_type = 'image/svg+xml'
         else:
             body = get_all_projects()
 
@@ -148,7 +154,7 @@ class ServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
         self.cors()
 
         self.send_header('Content-type', content_type)
-        if content_type == 'image/png':
+        if content_type in ['image/png', 'image/svg+xml']:
             self.send_header('Cache-Control', 'public; max-age=31536000')
             self.send_header('Etag', etag(body))
         self.end_headers()
@@ -165,8 +171,9 @@ class ServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
         content_len = int(self.headers.getheader('content-length', 0))
         content = self.rfile.read(content_len)
 
-        if content.startswith('data:image/png;base64,'):
-            content = datauri_contents(content)
+        for t in DATA_URLS:
+            if content.startswith(t):
+                content = datauri_contents(content, t)
 
         path = get_project_path(self)
         with open(path, 'w') as file:
