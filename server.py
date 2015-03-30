@@ -23,7 +23,7 @@ import SimpleHTTPServer
 import SocketServer
 
 from tempfile import mkstemp
-from subprocess import check_output
+from subprocess import check_output, CalledProcessError
 from md5 import md5
 
 from settings import Settings
@@ -103,7 +103,10 @@ def datauri_contents(data, type_):
         f.write(data[len(type_):])
 
     with open(p) as f:
-        data = check_output(['base64', '-d'], stdin=f)
+        try:
+            data = check_output(['base64', '-d'], stdin=f)
+        except CalledProcessError:
+            data = ''
     os.remove(p)
 
     return data
@@ -164,16 +167,20 @@ class ServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
     @authorize
     @check
     def do_POST(self):
-        self.send_response(200)
-        self.cors()
-        self.end_headers()
-
         content_len = int(self.headers.getheader('content-length', 0))
         content = self.rfile.read(content_len)
 
         for t in DATA_URLS:
             if content.startswith(t):
                 content = datauri_contents(content, t)
+
+        if content == '':
+            # 415 Unsupported Media Type
+            self.send_response(415)
+        else:
+            self.send_response(200)
+        self.cors()
+        self.end_headers()
 
         path = get_project_path(self)
         with open(path, 'w') as file:
